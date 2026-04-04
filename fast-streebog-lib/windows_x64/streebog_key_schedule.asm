@@ -176,4 +176,3 @@ streebog_key_schedule PROC
 
 streebog_key_schedule ENDP
 END
-END
