@@ -1,6 +1,5 @@
 .data
 ALIGN 16
-
 C_0:
     DB 0b1h, 008h, 05bh, 0dah, 01eh, 0cah, 0dah, 0e9h, 0ebh, 0cbh, 02fh
     DB 081h, 0c0h, 065h, 07ch, 01fh, 02fh, 06ah, 076h, 043h, 02eh, 045h
@@ -97,6 +96,7 @@ C_11:
     DB 088h, 0e1h, 028h, 052h, 0fah, 0f4h, 017h, 0d5h, 0d9h, 0b2h, 01bh
     DB 099h, 048h, 0bch, 092h, 04ah, 0f1h, 01bh, 0d7h, 020h
 
+
 C_TABLE:
     QWORD C_0
     QWORD C_1
@@ -110,70 +110,100 @@ C_TABLE:
     QWORD C_9
     QWORD C_10
     QWORD C_11
-
 .code
-EXTERN streebog_s_transform:PROC
-EXTERN streebog_p_transform:PROC
-EXTERN streebog_l_transform:PROC
 
-streebog_key_schedule PROC
+EXTERN streebog_xor_512_sse2:PROC
+EXTERN streebog_s_transform_sse2:PROC
+EXTERN streebog_p_transform_sse2:PROC
+EXTERN streebog_l_transform_sse2:PROC
 
+streebog_key_schedule_sse2 PROC
+    
+    ; работа с регистрами
     push rbx
     push rsi
     push r12
     push r13
-    push r14
-    sub  rsp, 40
+    push r14 
 
-    sub  rsp, 64
-    mov  r14, rsp ; tmp buffer
+    sub rsp, 40
 
-    mov rsi,  rcx ; K
-    mov r12d, edx ; round
-    mov r13,  r8 ; out
+    ; +64 байта под tmp
+    sub rsp, 64
+    mov r14, rsp ; tmp buffer
 
-    lea  rbx, [C_TABLE]
-    movsxd rax, r12d
-    mov  rbx, QWORD PTR [rbx + rax*8]
+    mov rsi, rcx ; K
+    mov r12d, edx ; i
+    mov r13, r8  ; out
+
+    ; загрузка указателя на наш ситейбл
+    lea rbx, [C_TABLE]
+    movsxd rax, r12d ; d тк даблворд
+    mov rbx, QWORD PTR [rbx + rax*8]
 
     ; ксор
-    vmovdqu64 zmm0, ZMMWORD PTR [rsi]
-    vmovdqu64 zmm1, ZMMWORD PTR [rbx]
-    vpxorq    zmm0, zmm0, zmm1
-    vmovdqu64 ZMMWORD PTR [r13], zmm0
+    mov rcx, rsi
+    mov rdx, rbx
+    mov r8,  r13
+    call streebog_xor_512_sse2
 
     ; с трансформ
-    mov rcx, r13
-    mov rdx, r14
-    call streebog_s_transform
-    vmovdqu64 zmm0, ZMMWORD PTR [r14]
-    vmovdqu64 ZMMWORD PTR [r13], zmm0
+    mov rcx, r13 ; in
+    mov rdx, r14 ; tmp
+    call streebog_s_transform_sse2
+
+    ; копируем буфер в аутпут
+    movdqu xmm0, XMMWORD PTR [r14]
+    movdqu xmm1, XMMWORD PTR [r14 + 16]
+    movdqu xmm2, XMMWORD PTR [r14 + 32]
+    movdqu xmm3, XMMWORD PTR [r14 + 48]
+
+    movdqu XMMWORD PTR [r13], xmm0
+    movdqu XMMWORD PTR [r13 + 16], xmm1
+    movdqu XMMWORD PTR [r13 + 32], xmm2
+    movdqu XMMWORD PTR [r13 + 48], xmm3
 
     ; транспонирование
     mov rcx, r13
     mov rdx, r14
-    call streebog_p_transform
-    vmovdqu64 zmm0, ZMMWORD PTR [r14]
-    vmovdqu64 ZMMWORD PTR [r13], zmm0
+    call streebog_p_transform_sse2
+
+    movdqu xmm0, XMMWORD PTR [r14]
+    movdqu xmm1, XMMWORD PTR [r14 + 16]
+    movdqu xmm2, XMMWORD PTR [r14 + 32]
+    movdqu xmm3, XMMWORD PTR [r14 + 48]
+
+    movdqu XMMWORD PTR [r13], xmm0
+    movdqu XMMWORD PTR [r13 + 16], xmm1
+    movdqu XMMWORD PTR [r13 + 32], xmm2
+    movdqu XMMWORD PTR [r13 + 48], xmm3
 
     ; линеар
     mov rcx, r13
     mov rdx, r14
-    call streebog_l_transform
-    vmovdqu64 zmm0, ZMMWORD PTR [r14]
-    vmovdqu64 ZMMWORD PTR [r13], zmm0
+    call streebog_l_transform_sse2
 
-    vzeroupper
+    movdqu xmm0, XMMWORD PTR [r14]
+    movdqu xmm1, XMMWORD PTR [r14 + 16]
+    movdqu xmm2, XMMWORD PTR [r14 + 32]
+    movdqu xmm3, XMMWORD PTR [r14 + 48]
 
-    add  rsp, 64
-    add  rsp, 40
-    pop  r14
-    pop  r13
-    pop  r12
-    pop  rsi
-    pop  rbx
+    movdqu XMMWORD PTR [r13], xmm0
+    movdqu XMMWORD PTR [r13 + 16], xmm1
+    movdqu XMMWORD PTR [r13 + 32], xmm2
+    movdqu XMMWORD PTR [r13 + 48], xmm3
+
+    ; работа с регистрами
+    add rsp, 64
+    add rsp, 40
+
+    pop r14
+    pop r13
+    pop r12
+    pop rsi
+    pop rbx
     ret
 
-streebog_key_schedule ENDP
-END
+streebog_key_schedule_sse2 ENDP
+
 END

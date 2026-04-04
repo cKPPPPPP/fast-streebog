@@ -1,6 +1,5 @@
 .data
 ALIGN 16
-
 C_0:
     DB 0b1h, 008h, 05bh, 0dah, 01eh, 0cah, 0dah, 0e9h, 0ebh, 0cbh, 02fh
     DB 081h, 0c0h, 065h, 07ch, 01fh, 02fh, 06ah, 076h, 043h, 02eh, 045h
@@ -97,6 +96,7 @@ C_11:
     DB 088h, 0e1h, 028h, 052h, 0fah, 0f4h, 017h, 0d5h, 0d9h, 0b2h, 01bh
     DB 099h, 048h, 0bch, 092h, 04ah, 0f1h, 01bh, 0d7h, 020h
 
+
 C_TABLE:
     QWORD C_0
     QWORD C_1
@@ -112,68 +112,81 @@ C_TABLE:
     QWORD C_11
 
 .code
-EXTERN streebog_s_transform:PROC
-EXTERN streebog_p_transform:PROC
-EXTERN streebog_l_transform:PROC
 
-streebog_key_schedule PROC
+
+EXTERN streebog_xor_512_avx2:PROC
+EXTERN streebog_s_transform_avx2:PROC
+EXTERN streebog_p_transform_avx2:PROC
+EXTERN streebog_l_transform_avx2:PROC
+
+streebog_key_schedule_avx2 PROC
 
     push rbx
     push rsi
     push r12
     push r13
     push r14
-    sub  rsp, 40
 
-    sub  rsp, 64
-    mov  r14, rsp ; tmp buffer
+    sub rsp, 40 ; 5 * 8 = 40 байт
 
-    mov rsi,  rcx ; K
-    mov r12d, edx ; round
-    mov r13,  r8 ; out
+    sub rsp, 64
+    mov r14, rsp ; tmp buffer
 
-    lea  rbx, [C_TABLE]
-    movsxd rax, r12d
-    mov  rbx, QWORD PTR [rbx + rax*8]
+    mov rsi, rcx ; K
+    mov r12d, edx ; i
+    mov r13, r8 ; out
+
+    lea rbx, [C_TABLE]
+    movsxd rax, r12d ; d тк даблворд
+    mov rbx, QWORD PTR [rbx + rax*8]
 
     ; ксор
-    vmovdqu64 zmm0, ZMMWORD PTR [rsi]
-    vmovdqu64 zmm1, ZMMWORD PTR [rbx]
-    vpxorq    zmm0, zmm0, zmm1
-    vmovdqu64 ZMMWORD PTR [r13], zmm0
+    mov rcx, rsi
+    mov rdx, rbx
+    mov r8,  r13
+    call streebog_xor_512_avx2
 
     ; с трансформ
     mov rcx, r13
     mov rdx, r14
-    call streebog_s_transform
-    vmovdqu64 zmm0, ZMMWORD PTR [r14]
-    vmovdqu64 ZMMWORD PTR [r13], zmm0
+    call streebog_s_transform_avx2
+
+    vmovdqu ymm0, YMMWORD PTR [r14]
+    vmovdqu ymm1, YMMWORD PTR [r14+32]
+    vmovdqu YMMWORD PTR [r13],    ymm0
+    vmovdqu YMMWORD PTR [r13+32], ymm1
 
     ; транспонирование
     mov rcx, r13
     mov rdx, r14
-    call streebog_p_transform
-    vmovdqu64 zmm0, ZMMWORD PTR [r14]
-    vmovdqu64 ZMMWORD PTR [r13], zmm0
+    call streebog_p_transform_avx2
+
+    vmovdqu ymm0, YMMWORD PTR [r14]
+    vmovdqu ymm1, YMMWORD PTR [r14+32]
+    vmovdqu YMMWORD PTR [r13],    ymm0
+    vmovdqu YMMWORD PTR [r13+32], ymm1
 
     ; линеар
     mov rcx, r13
     mov rdx, r14
-    call streebog_l_transform
-    vmovdqu64 zmm0, ZMMWORD PTR [r14]
-    vmovdqu64 ZMMWORD PTR [r13], zmm0
+    call streebog_l_transform_avx2
+
+    vmovdqu ymm0, YMMWORD PTR [r14]
+    vmovdqu ymm1, YMMWORD PTR [r14+32]
+    vmovdqu YMMWORD PTR [r13],    ymm0
+    vmovdqu YMMWORD PTR [r13+32], ymm1
+
+    add rsp, 64
+    add rsp, 40
+
+    pop r14
+    pop r13
+    pop r12
+    pop rsi
+    pop rbx
 
     vzeroupper
-
-    add  rsp, 64
-    add  rsp, 40
-    pop  r14
-    pop  r13
-    pop  r12
-    pop  rsi
-    pop  rbx
     ret
 
-streebog_key_schedule ENDP
-END
+streebog_key_schedule_avx2 ENDP
 END

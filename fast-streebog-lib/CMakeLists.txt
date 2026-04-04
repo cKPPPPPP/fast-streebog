@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(fast-streebog-lib LANGUAGES C CXX)
+message(STATUS "CXX FLAGS: ${CMAKE_CXX_FLAGS}")
 
 option(FAST_STREEBOG_AS_SUBDIR "Build as subdirectory of another project" OFF)
 if(FAST_STREEBOG_AS_SUBDIR)
@@ -19,22 +20,54 @@ option(USE_ASM "Use assembly optimizations when available" ON)
 # Detect platform and set ASM sources
 set(ASM_SOURCES "")
 set(USE_PLATFORM_ASM OFF)
-
 if(USE_ASM)
-    # Windows x64 with MSVC - use MASM
     if(MSVC AND CMAKE_SIZEOF_VOID_P EQUAL 8)
-        set(ASM_SOURCES
-            windows_x64/streebog_xor_512.asm
-            windows_x64/streebog_add_512.asm
-            windows_x64/streebog_s_transform.asm
-            windows_x64/streebog_p_transform.asm
-            windows_x64/streebog_l_transform.asm
-            windows_x64/streebog_key_schedule.asm
-        )
-        set(USE_PLATFORM_ASM ON)
-        message(STATUS "Using Windows x64 MASM optimizations")
-    # Unix ARM64 (Linux, macOS, BSD) - use GAS (GNU Assembler syntax)
+    enable_language(ASM_MASM)
+
+    # AVX-512 (папка windows_x64)
+    set(ASM_SOURCES_AVX512
+        ${CMAKE_CURRENT_SOURCE_DIR}/windows_x64/streebog_xor_512.asm
+        ${CMAKE_CURRENT_SOURCE_DIR}/windows_x64/streebog_add_512.asm
+        ${CMAKE_CURRENT_SOURCE_DIR}/windows_x64/streebog_s_transform.asm
+        ${CMAKE_CURRENT_SOURCE_DIR}/windows_x64/streebog_p_transform.asm
+        ${CMAKE_CURRENT_SOURCE_DIR}/windows_x64/streebog_l_transform.asm
+        ${CMAKE_CURRENT_SOURCE_DIR}/windows_x64/streebog_key_schedule.asm
+    )
+
+    # AVX2
+    set(ASM_SOURCES_AVX2
+        ${CMAKE_CURRENT_SOURCE_DIR}/windows_x64_avx2/streebog_xor_512_avx2.asm
+        ${CMAKE_CURRENT_SOURCE_DIR}/windows_x64_avx2/streebog_add_512_avx2.asm
+        ${CMAKE_CURRENT_SOURCE_DIR}/windows_x64_avx2/streebog_s_transform_avx2.asm
+        ${CMAKE_CURRENT_SOURCE_DIR}/windows_x64_avx2/streebog_p_transform_avx2.asm
+        ${CMAKE_CURRENT_SOURCE_DIR}/windows_x64_avx2/streebog_l_transform_avx2.asm
+        ${CMAKE_CURRENT_SOURCE_DIR}/windows_x64_avx2/streebog_key_schedule_avx2.asm
+    )
+
+    # SSE2
+    set(ASM_SOURCES_SSE2
+        ${CMAKE_CURRENT_SOURCE_DIR}/windows_x64_sse2/streebog_xor_512_sse2.asm
+        ${CMAKE_CURRENT_SOURCE_DIR}/windows_x64_sse2/streebog_add_512_sse2.asm
+        ${CMAKE_CURRENT_SOURCE_DIR}/windows_x64_sse2/streebog_s_transform_sse2.asm
+        ${CMAKE_CURRENT_SOURCE_DIR}/windows_x64_sse2/streebog_p_transform_sse2.asm
+        ${CMAKE_CURRENT_SOURCE_DIR}/windows_x64_sse2/streebog_l_transform_sse2.asm
+        ${CMAKE_CURRENT_SOURCE_DIR}/windows_x64_sse2/streebog_key_schedule_sse2.asm
+    )
+
+    set(ASM_SOURCES
+        ${ASM_SOURCES_AVX2}
+        ${ASM_SOURCES_SSE2}
+    )
+
+    foreach(asm_file ${ASM_SOURCES})
+        set_source_files_properties(${asm_file} PROPERTIES LANGUAGE ASM_MASM)
+    endforeach()
+
+    set(USE_PLATFORM_ASM ON)
+    message(STATUS "Using Windows x64 MASM optimizations (AVX512 + AVX2 + SSE2)")
+
     elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64|ARM64")
+        # ARM64 — без изменений
         set(ASM_SOURCES
             unix_arm64/streebog_xor_512.S
             unix_arm64/streebog_add_512.S
@@ -45,12 +78,19 @@ if(USE_ASM)
             unix_arm64/streebog_precalc_tables.S
             unix_arm64/streebog_constants.S
         )
+        enable_language(ASM)
+        foreach(asm_file ${ASM_SOURCES})
+            set_source_files_properties(${asm_file} PROPERTIES LANGUAGE ASM)
+        endforeach()
+        target_compile_options(fast-streebog-lib PRIVATE -march=armv8-a+crypto)
+        target_compile_options(fast-streebog-dll PRIVATE -march=armv8-a+crypto)
         set(USE_PLATFORM_ASM ON)
-        message(STATUS "Using ARM64 NEON optimizations (Unix)")
+        message(STATUS "Using ARM64 NEON optimizations")
     else()
-        message(STATUS "No ASM optimizations available for this platform, using C implementation")
+        message(STATUS "No ASM optimizations for this platform, using C fallback")
     endif()
 endif()
+
 
 # ==================== Static Library ====================
 add_library(fast-streebog-lib STATIC
